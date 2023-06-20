@@ -16,7 +16,8 @@ ActionPotential$methods(
       
       lines(x = t, y=AP_val, col="purple")
       legend(0, 100, 
-             legend=c("AP", expression(I[m]), "Pulse", "Exp data"),
+             legend=c("AP", expression(I[m]), "Pulse", 
+                      "Exp data"),
              col=c('black', 'gray', 'blue', 'purple'),
              lty=1)
     })
@@ -30,7 +31,7 @@ ActionPotential$methods(
       plot(t, Vs, 
            main="Current Decomposition",
            xlab="Time (ms)",
-           ylab="Current (mA)",
+           ylab="Current (nA)",
            type='l',
            ylim=c(y_min,y_max))
       lines(t, Is, col="gray")
@@ -40,8 +41,10 @@ ActionPotential$methods(
       lines(t, Istims, col="aquamarine3")
       
       legend(0, y_max, 
-             legend=c("AP", expression(I[m]), expression(I[K]), expression(I[Na]), expression(I[Leak]), "Pulse"),
-             col=c('black', 'gray', 'blue', 'springgreen4', 'pink', 'aquamarine3'), 
+             legend=c("AP", expression(I[m]), expression(I[K]), 
+                expression(I[Na]), expression(I[Leak]), "Pulse"),
+             col=c('black', 'gray', 'blue', 'springgreen4', 
+                   'pink', 'aquamarine3'), 
              lty=1)
     })
   },
@@ -88,7 +91,8 @@ ActionPotential$methods(
            legend=c(expression(alpha[n]), expression(beta[n]), 
                     expression(alpha[m]), expression(beta[m]), 
                     expression(alpha[h]), expression(beta[h])),
-           col=c('blue', 'blue', 'springgreen4', "springgreen4", "red", "red"), 
+           col=c('blue', 'blue', 'springgreen4', "springgreen4", 
+                 "red", "red"), 
            lty=c(1,2,1,2,1,2))
   },
   
@@ -123,7 +127,8 @@ ActionPotential$methods(
     lines(t, ms^3*hs, col="springgreen4", lty=2)
     legend(time-5, 1, 
            legend=c('n', 'm', 'h', "K", "Na"),
-           col=c('blue', 'springgreen4', 'red', "blue", "springgreen4"), 
+           col=c('blue', 'springgreen4', 'red', "blue", 
+                 "springgreen4"), 
            lty=c(1,1,1,2,2))
   },
   
@@ -174,7 +179,8 @@ ActionPotential$methods(
     display_infinities()
   },
   
-  # Plot the AP simulation across a range of values for each parameter
+  # Plot the AP simulation across a range of values for each 
+  #   parameter
   plot_param_range = function() {
     for(i in 1:(length(all_params))) {
       update_model(all_params)
@@ -190,7 +196,9 @@ ActionPotential$methods(
       #lines(t, Istims, col="green")
       
       legend(20, 75, legend=c(0, max_seq), 
-             fill = c(rgb(max_seq,0,0, max=max_seq),rgb(0,0,max_seq, max=max_seq)))
+             fill = c(rgb(max_seq,0,0, max=max_seq),rgb(0,0,
+                                                  max_seq, 
+                                                  max=max_seq)))
       
       par = seq(0,max_seq,length.out=100)
       for(val in par) {

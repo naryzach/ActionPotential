@@ -1,0 +1,57 @@
+---
+title: "Action Potential - Statisitcal Analysis"
+output: 
+  html_document: default
+  pdf_document:
+    latex_engine: xelatex
+    pandoc_args: --listings
+date: "`r Sys.Date()`"
+params:
+  run: FALSE
+  cores: 1
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(doParallel)
+library(foreach)
+library(knitr)
+source("ActionPotential.R")
+source("vars.R")
+```
+
+```{r header, echo=FALSE}
+with(as.list(par_0), {
+  opt_par_stat <<- c(#N_6=N_6,N_7=N_7,N_1=N_1,N_2=N_2,
+                  M_6=M_6,M_7=M_7,M_1=M_1,M_2=M_2,
+                  H_4=H_4,H_6=H_6,#H_5=H_5,H_3=H_3,
+                  g_K=g_K, g_Na=g_Na#, g_Leak=g_Leak
+                  )
+})
+```
+
+
+```{r opt, echo=FALSE}
+AP_stat = ActionPotentialStat(par_0, trace_data_ex, time_data_ex, "Stat")
+if(params$run)
+  AP_stat$run_statistical_analysis(cores=params$cores, opt_param=opt_par_stat)
+stats = AP_stat$show_statistical_analysis()
+```
+
+\newpage
+
+# Plots of the Relationship Between Each Parameter for Multiple Optimizations
+
+```{r main, echo=TRUE, results="asis"}
+chunk_size = 4
+for(i in 1:(ncol(stats)/chunk_size+1)) {
+  end = i*chunk_size
+  if(ncol(stats)<end) {
+    end = ncol(stats)
+  }
+  print(kable(stats[((i-1)*chunk_size+1):end], caption="Statistical Analysis"))
+}
+```
+
+

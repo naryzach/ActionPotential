@@ -1,12 +1,15 @@
+# Libraries needed for ActionPotential
 library(methods)
 library(deSolve)
 library(compiler)
 source("Subunit.R")
 
+# Action Potential object declaration
 ActionPotential <- setRefClass("ActionPotential",
   fields = list(
     # Initial Data
-    all_params="vector",trace_data="vector",dt="numeric",AP_name="character",
+    all_params="vector",trace_data="vector",dt="numeric",
+    AP_name="character",
     
     # Sub-unit Declarations
     n="Subunit", m="Subunit",h="Subunit",
@@ -17,8 +20,8 @@ ActionPotential <- setRefClass("ActionPotential",
     stim_A="numeric",
     
     # Action Potential Values
-    time="numeric", stabil_time="numeric", tot_wait="numeric", t="vector",
-    peak_approx="numeric", pk_dur_est="numeric",
+    time="numeric", stabil_time="numeric", tot_wait="numeric",
+    t="vector", peak_approx="numeric", pk_dur_est="numeric",
     AP_max="numeric", AP_min="numeric", AP_height="numeric",
     RMP="numeric", V_init="numeric", Vs="vector", AP_val="vector"
   )
@@ -27,7 +30,9 @@ ActionPotential <- setRefClass("ActionPotential",
 # Core methods for ActionPotential
 ActionPotential$methods(
   # Set up action potential class
-  initialize = function(in_all_params, in_trace_data, in_time_data, name="Nameless") {
+  initialize = function(in_all_params, in_trace_data, 
+                        in_time_data, name="Nameless") {
+    # Set ActionPotential name
     AP_name <<- name
     
     # Default values
@@ -51,12 +56,13 @@ ActionPotential$methods(
     stim_d <<- 0.64
     stim_h <<- 54.874
     stim_dim <<- 2
-    stim_A <<- integrate(.self$stim_function, lower=0, upper=stim_d)$value
+    stim_A <<- integrate(.self$stim_function, lower=0, 
+                         upper=stim_d)$value
     tot_wait <<- stabil_time
     
     # Approximate information about experimental traces
-    peak_approx <<- 2 # Approximate time of peak after stimulus (per data cleaning protocol)
-    pk_dur_est <<- 5 # Approximate duration of the peak over exp. data
+    peak_approx <<- 2 # Approximate time of peak after stimulus
+    pk_dur_est <<- 5 # Approximate duration of the peak
     
     # Prepare action potential
     trace_data <<- in_trace_data
@@ -64,8 +70,9 @@ ActionPotential$methods(
     AP_min <<- min(trace_data)
     AP_height <<- AP_max-AP_min
     RMP <<- min(trace_data[1:(peak_approx/dt)]) + 
-            ( max(trace_data[((pk_dur_est+1)/dt):((pk_dur_est+1.2)/dt)]) - 
-            min(trace_data[((pk_dur_est+1)/dt):((pk_dur_est+1.2)/dt)]) )/2
+      (max(trace_data[((pk_dur_est+1)/dt):((pk_dur_est+1.2)/dt)])
+      -min(trace_data[((pk_dur_est+1)/dt):((pk_dur_est+1.2)/dt)]) 
+      )/2
     V_init <<- RMP
     l = length(trace_data)
     AP_val <<- c(rep(RMP,(stabil_time)/dt+1), 
@@ -75,12 +82,16 @@ ActionPotential$methods(
     t <<- seq(0,time,dt) # time in ms
     Vs <<- rep(V_init, length(t))
     
+    # Preemptively calulate Vs
     generate_trace()
   },
   
   # Calculate the trace values
   generate_trace = cmpfun(function(PLOT=FALSE) {
+    # Initialize empty model data
     Vs_loc = rep(V_init, length(t))
+    
+    # Include tracking if plotting
     if (PLOT) {
       Is = rep(0, length(t))
       Istims = rep(0, length(t))
@@ -103,7 +114,7 @@ ActionPotential$methods(
     V_m = V_init
     for (timestep in tail(t,-1)) {
       # Inject pulse after stabilization delay
-      if (timestep > tot_wait && timestep < (tot_wait + stim_d)) {
+      if (timestep > tot_wait && timestep < (tot_wait + stim_d)){
         I_stim = stim_function(timestep-tot_wait)
       } else {
         I_stim = 0
@@ -134,23 +145,33 @@ ActionPotential$methods(
       }
       i = i+1
     }
+    
+    # Return plotting information if requested
     if (PLOT) {
-      return(list(Vs=Vs_loc, Is=Is, INas=INas, IKs=IKs, ILeaks=ILeaks, Istims=Istims, 
+      return(list(Vs=Vs_loc, Is=Is, INas=INas, IKs=IKs, 
+                  ILeaks=ILeaks, Istims=Istims, 
                   ns=ns, ms=ms, hs=hs))
     }
+    
+    # Update Vs
     Vs <<- Vs_loc
   }),
   
   # Define derivative functions
-  dn = cmpfun(function(n, n_prob, V) return(n@alpha(V)*(1-n_prob)-n@beta(V)*n_prob)),
-  dm = cmpfun(function(m, m_prob, V) return(m@alpha(V)*(1-m_prob)-m@beta(V)*m_prob)),
-  dh = cmpfun(function(h, h_prob, V) return(h@alpha(V)*(1-h_prob)-h@beta(V)*h_prob)),
-  dV = cmpfun(function(I_m, I_stim) return(I_stim-I_m)),
+  dn = cmpfun(function(n, n_prob, V) 
+    return(n@alpha(V)*(1-n_prob)-n@beta(V)*n_prob)),
+  dm = cmpfun(function(m, m_prob, V) 
+    return(m@alpha(V)*(1-m_prob)-m@beta(V)*m_prob)),
+  dh = cmpfun(function(h, h_prob, V) 
+    return(h@alpha(V)*(1-h_prob)-h@beta(V)*h_prob)),
+  dV = cmpfun(function(I_m, I_stim) 
+    return(I_stim-I_m)),
   
   # Function to generate trace using ode method
   gen_trace_ode = cmpfun(function(params=all_params) {
     trace_soln = ode(func=.self$AP_ode, parms=params,
-                     y=c(V=V_init, n=infty(n, V_init), m=infty(m, V_init), h=infty(h, V_init)),
+                     y=c(V=V_init, n=infty(n, V_init), 
+                         m=infty(m, V_init), h=infty(h, V_init)),
                      times=t, method="ode23")
     Vs <<- unlist(trace_soln[,2])
   }),
@@ -203,8 +224,7 @@ ActionPotential$methods(
   # Update the model with new parameters
   update_model = cmpfun(function(params) {
     update_subunits(params)
-    generate_trace()
-    #gen_trace_ode()
+    generate_trace() # can use gen_trace_ode()
   }),
   
   # Update the values for the stimulus
@@ -218,6 +238,12 @@ ActionPotential$methods(
   # Return the trace_data
   get_trace_data = function() {
     return(Vs)
+  },
+  
+  trace_data_as_ex_data = function() {
+    generate_trace()
+    return(Vs[(stabil_time/dt):
+                (stabil_time/dt+length(trace_data))])
   }
 )
 

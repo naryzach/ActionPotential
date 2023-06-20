@@ -1,0 +1,169 @@
+---
+title: "Action Potential - Pairwise Comparison"
+output: 
+  html_document: default
+  pdf_document:
+    latex_engine: xelatex
+    pandoc_args: --listings
+date: "`r Sys.Date()`"
+params:
+  run: FALSE
+  cores: 1
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(doParallel)
+library(foreach)
+library(SobolSequence)
+library(knitr)
+source("ActionPotential.R")
+source("vars.R")
+```
+
+```{r header, echo=FALSE}
+trace_files = c("Atratus_WT.csv", "Atratus_P.csv", 
+                "Atratus_EPN.csv")
+group_file = "trp_data"
+loc_dir = paste("/Triple/", Sys.Date(), "/", sep="")
+output_folder_pr = paste(output_folder, loc_dir, sep="")
+dir.create(output_folder_pr)
+
+with(as.list(par_0), {
+  opt_par_pr <<- c(N_6=N_6,N_7=N_7,N_1=N_1,N_2=N_2,
+                  M_6=M_6,M_7=M_7,M_1=M_1,M_2=M_2,
+                  H_4=H_4,H_5=H_5,H_6=H_6,H_3=H_3,
+                  g_K=g_K, g_Na=g_Na, g_Leak=g_Leak)
+})
+
+stat_file = "trp_par"
+og_stat_file = "stat_par_og"
+stat_ref_data = "stat_AP_ref"
+opt_ref_data = "opt_par_ref"
+```
+
+```{r functions, echo=FALSE}
+# Perform the statistical analysis
+pair_comp = cmpfun(function(all_params, opt_params,
+                            cores=(detectCores() - 1)) {
+  AP_stat = ActionPotential(all_params, trace_data_ex, time_data_ex, "Pair")
+  num_fits = 15
+  range = 2.5
+  center = ifelse(range < 1, 1, range + 0.1)
+  
+  # Generate trace data to use for comparison
+  trace_data_gen = AP_stat$trace_data_as_ex_data()
+  time_data_gen = c(0, AP_stat$dt)
+  
+  # Save reference data to refer to later
+  AP_ref = ActionPotential(all_params, trace_data_gen, 
+                           time_data_gen)
+  saveRDS(AP_ref, file = paste(output_folder_pr, stat_ref_data, 
+                               ".Rds", sep=""))
+  saveRDS(opt_params, file = paste(output_folder_pr, opt_ref_data,
+                                   ".Rds", sep=""))
+  
+  print(paste("Fits: ", num_fits, ". Range: ", range, 
+              ". Center: ", center, ". Cores: ", cores, 
+              sep = ""))
+  message(paste("Fits: ", num_fits, ". Range: ", range, 
+              ". Center: ", center, ". Cores: ", cores, 
+              sep = ""))
+  
+  # Generate quasi-random parameter sets
+  init_par = as.data.frame(sobolSequence.points(
+    length(opt_params), count=num_fits)*(2*range) + 
+      (center-range))
+  colnames(init_par) = names(opt_params)
+  for(r in 1:nrow(init_par)) {
+    init_par[r,] = init_par[r,] * opt_params
+  }
+  # Add in fixed parameters
+  non_opt_params = all_params[! names(all_params) %in% 
+                                names(opt_params)]
+  if(length(non_opt_params) > 0) {
+    for(i in 1:length(non_opt_params)) {
+      init_par = cbind(init_par, rep(non_opt_params[i], 
+                                     nrow(init_par)))
+      colnames(init_par)[ncol(init_par)] = 
+        names(non_opt_params[i])
+    }
+  }
+  saveRDS(init_par, file = paste(output_folder_pr, og_stat_file,
+                                 ".Rds", sep=""))
+  
+  if (file.exists(paste(stat_file, ".Rds", sep=""))) {
+    file.remove(paste(stat_file, ".Rds", sep=""))
+  }
+  
+  # Run computation for identifiability analysis
+  clust = makeCluster(cores)
+  clusterExport(clust, c("init_par", "opt_params", 
+                         "trace_data_gen", "time_data_gen"), 
+                envir=environment())
+  registerDoParallel(clust)
+  data_one <- foreach(i = 1:num_fits, .combine = rbind, 
+                      .errorhandling = 'remove') %dopar% { 
+    source("ActionPotential.R")
+    cur_pars = unlist(init_par[i,])
+    cur_opt_pars = cur_pars[names(cur_pars) %in% 
+                              names(opt_params)]
+    AP_stat = ActionPotential(cur_pars, trace_data_gen, 
+                              time_data_gen)
+    out_par = AP_stat$optimize(cur_opt_pars)
+    
+    data.frame(t(sapply(out_par$par,c)), values=out_par$value, 
+               convergence=out_par$convergence)
+  }
+  stopCluster(clust)
+  
+  # Sort data
+  data_one = (data_one[order(data_one$values),])
+  
+  # Save output data
+  pair_names = paste(names(opt_params[1]), names(opt_params[2]),
+                     names(opt_params[3]), sep="")
+  saveRDS(data_one, file = paste(output_folder_pr, stat_file, 
+                                 pair_names, ".Rds", sep=""))
+  
+  if (TRUE) {
+    # take all values 20% away from the min value
+    min_val = data_one[,"values"][1]
+    new_max_val = min_val*1.2
+    max_range = length(which(data_one[,"values"] <= new_max_val))
+    data_one = data_one[1:ifelse(max_range<10,10,max_range),]
+  }
+  data_one = data_one[,!(names(data_one) %in% 
+                           c("values","convergence"))]
+  
+  return(data_one)
+})
+```
+
+```{r main, echo=FALSE, message=FALSE}
+library(rgl)
+if(params$run) {
+  for(i in 1:length(par_0)){
+    for(j in 1:length(par_0)) {
+      for(k in 1:length(par_0)) {
+        if(i<j && j<k){
+          opt_pars_trp = c(par_0[i],par_0[j],par_0[k])
+          message(names(opt_pars_trp))
+          data = pair_comp(par_0, opt_pars_trp, params$cores)
+          plot3d(x=data[,1],y=data[,2],z=data[,3],
+               main=paste(colnames(data)[1], "vs", 
+                          colnames(data)[2], "vs", 
+                          colnames(data)[3]),
+               xlab=colnames(data)[1],
+               ylab=colnames(data)[2],
+               zlab=colnames(data)[3],
+               col=colorRampPalette(c("blue","red"))(nrow(data)))
+          #print(summary(lm(data[,1]~data[,2])))
+        }
+      }
+    }
+  }
+} else {
+}
+```

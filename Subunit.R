@@ -11,7 +11,8 @@ setMethod("tau",
 setMethod("infty",
           "Subunit",
           function(object, V) {
-            return(object@alpha(V)/(object@alpha(V)+object@beta(V)))
+            return(object@alpha(V)/
+                     (object@alpha(V)+object@beta(V)))
           })
 
 # Nernst equation
@@ -28,4 +29,5 @@ nernst <- function(z, cons_out, cons_in) {
 K_orig <- new("Channel", g=36, E=nernst(1,5.4,143))
 Na_orig <- new("Channel", g=120, E=nernst(1,145,9.6))
 Cl_orig <- new("Channel", g=0.3, E=nernst(-1,127.7,8.7))
-Leak_orig <- new("Channel", g=0.3, E=(nernst(-1,127.7,8.7)+nernst(2,1.8,3.5)) )
+Leak_orig <- new("Channel", g=0.3, E=(nernst(-1,127.7,8.7)+
+                                        nernst(2,1.8,3.5)) )

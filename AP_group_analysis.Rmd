@@ -1,0 +1,339 @@
+---
+title: "Action Potential - Group Analysis"
+output: 
+  html_document: default
+  pdf_document:
+    latex_engine: xelatex
+    pandoc_args: --listings
+date: "`r Sys.Date()`"
+params:
+  run: FALSE
+  cores: 1
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(nlme)
+library(doParallel)
+library(foreach)
+library(SobolSequence)
+library(knitr)
+source("ActionPotential.R")
+source("vars.R")
+```
+
+```{r header, echo=FALSE}
+trace_files = c("Atratus_WT.csv", "Atratus_P.csv", 
+                "Atratus_EPN.csv")
+#trace_files = c("Atratus_WT.csv", "Atratus_EPN.csv")
+group_file = "group_par"
+#loc_dir = paste("/Group/", "2023-05-01All/", sep="")
+loc_dir = paste("/Group/", Sys.Date(), "All/", sep="")
+output_folder_grp = paste(output_folder, loc_dir, sep="")
+dir.create(output_folder_grp)
+
+with(as.list(par_0), {
+  opt_par_group <<- c(#N_6=N_6,N_7=N_7,N_1=N_1,N_2=N_2,
+                  M_6=M_6,M_7=M_7,M_1=M_1,M_2=M_2,
+                  #H_4=H_4,H_5=H_5,H_6=H_6,H_3=H_3,
+                  g_Na=g_Na, g_K=g_K#,g_Leak=g_Leak
+                  )
+})
+```
+
+```{r functions, echo=FALSE}
+get_group_pars <- function(pars, fixed_pars, free_pars, file) {
+  data = read.csv(paste(data_folder, file, sep=""), skip=3)
+  N = (ncol(data)/2)
+  dt = 0
+  time = Inf
+  for(i in 1:N) {
+    Time = na.omit(data[,(2*i-1)])
+    dt_loc = round((Time[2]-Time[1]),3)
+    time_loc = Time[length(Time)]
+    if (dt_loc > dt) {
+      dt = dt_loc
+    }
+    if (time_loc < time) {
+      time = time_loc
+    }
+  }
+
+  t = seq(0, time, dt)
+  Vs = c()
+  for(timestep in t) {
+    v_tmp = c()
+    for (i in 1:N) {
+      Time = round(data[,(2*i-1)], 3)
+      Volts = data[,(2*i)]
+      v_tmp = append(v_tmp, Volts[which(Time==timestep)])
+    }
+    Vs = append(Vs, mean(v_tmp))
+  }
+  Vs = na.omit(Vs)
+  
+  AP_tmp = ActionPotential(pars, Vs, t, "Group Average")
+  AP_tmp$find_foot()
+  AP_tmp$optimize(free_pars)
+  AP_tmp$display_action_potential()
+  return(AP_tmp)
+}
+
+gen_exp_traces <- function(pars, fixed_pars, free_pars, 
+                           group_trace, group_time, num_fits) {
+  #num_fits = 5
+  range = 0.05
+
+  # Create uniformly distributed set of free paramters
+  init_par = as.data.frame(sobolSequence.points(length(free_pars), 
+                          count=num_fits)*(2*range) + (1-range))
+  colnames(init_par) = names(free_pars)
+  for(r in 1:nrow(init_par)) {
+    init_par[r,] = init_par[r,] * free_pars
+  }
+  # Add in fixed paramters
+  if(length(fixed_pars) > 0) {
+    for(i in 1:length(fixed_pars)) {
+      init_par = cbind(init_par, 
+                       rep(fixed_pars[i], nrow(init_par)))
+      colnames(init_par)[ncol(init_par)] = names(fixed_pars[i])
+    }
+  }
+  
+  # Get varied experimental traces
+  varied_traces = foreach(i = 1:num_fits, 
+                          .combine = rbind) %do% {
+    tmp_par = unlist(init_par[i,])
+    AP_group = ActionPotential(tmp_par, group_trace, group_time)
+    AP_group$display_action_potential()
+    Vs_gen = AP_group$Vs
+    
+    # Trim atrificially implied data generated from trace
+    st = AP_group$stabil_time
+    dt = AP_group$dt
+    l = length(AP_group$trace_data)
+    Vs_gen[(st/dt):(st/dt+l)]
+  }
+  return(varied_traces)
+}
+
+get_fixed_set <- function(pars, fixed_pars, free_pars, 
+                          num_fits) {
+  #num_fits = 10
+  range = 0.25
+  
+  init_par = as.data.frame(sobolSequence.points(length(fixed_pars), 
+                          count=num_fits)*(2*range) + (1-range))
+  colnames(init_par) = names(fixed_pars)
+  for(r in 1:nrow(init_par)) {
+    init_par[r,] = init_par[r,] * fixed_pars
+  }
+  # Add in free paramters
+  if(length(free_pars) > 0) {
+    for(i in 1:length(free_pars)) {
+      init_par = cbind(init_par, rep(free_pars[i], 
+                                     nrow(init_par)))
+      colnames(init_par)[ncol(init_par)] = names(free_pars[i])
+    }
+  }
+  
+  return(init_par)
+}
+
+```
+
+```{r main, echo=FALSE, message=FALSE}
+num_tables = 25
+num_gen_trace = 10
+num_nudge = 20
+
+# Start with initail parameters
+free = par_0[names(par_0) %in% names(opt_par_group)]
+fixed = par_0[! names(par_0) %in% names(opt_par_group)]
+
+if (params$run) {
+  print(opt_par_group)
+  # Generate groups (as type ActionPotential for data management)
+  num_groups = length(trace_files)
+  groups = foreach(i = 1:num_groups, .combine = c) %do% {
+    print(paste("AP ave for group", trace_files[i]))
+    AP = get_group_pars(par_0, fixed, free, trace_files[i])
+    message(paste("Group", i, "Created"))
+    saveRDS(AP, file = paste(output_folder_grp, group_file, i, 
+                             "groupAP.Rds", sep=""))
+    AP
+  }
+  saveRDS(groups, file = paste(output_folder_grp, group_file, 
+                               "AllgroupAPs.Rds", sep=""))
+  message("Groups Created")
+  
+  # Generate quasi-experimental data (as a list of tables with 
+  #   each row as a trace)
+  #   eg.: traces_by_group[[group]][trace,]
+  traces_by_group = vector("list", length(groups))
+  traces_by_group_comb = foreach(i = 1:length(groups), 
+                                 .combine = list) %do% {
+    AP_tmp = groups[[i]]
+    
+    # Trim atrificially implied data generated from trace
+    trace_Vs = AP_tmp$Vs
+    st = AP_tmp$stabil_time
+    dt = AP_tmp$dt
+    l = length(AP_tmp$trace_data)
+    trace_Vs = trace_Vs[(st/dt):(st/dt+l)]
+    print(paste("Generated APs for group", trace_files[i]))
+    traces = gen_exp_traces(AP_tmp$all_params, fixed, free, 
+                            trace_Vs, AP_tmp$t, num_gen_trace)
+    saveRDS(traces, file = paste(output_folder_grp, group_file, 
+                                 i, "groupTraces.Rds", sep=""))
+    message(paste("Traces for group", trace_files[i], "Created"))
+    traces_by_group[[i]] = traces
+    traces
+  }
+  saveRDS(traces_by_group, file = paste(output_folder_grp, 
+                      group_file, "AllgroupTraces.Rds", sep=""))
+  message("Traces Generated")
+  
+  # Get set with ransomized fixed parameters
+  sobol_fixed = get_fixed_set(par_0, fixed, free, num_tables)
+  saveRDS(sobol_fixed, file = paste(output_folder_grp, 
+                              group_file, "Sobols.Rds", sep=""))
+  message("Sobol fixed set created")
+  
+  # Generate list of tables of optimized free parameters
+  clust = makeCluster(ifelse(num_tables<params$cores, num_tables, 
+                             params$cores))
+  clusterExport(clust, c("sobol_fixed", "groups", 
+                         "traces_by_group", "output_folder_grp", 
+                         "group_file", "opt_par_group", 
+                         "num_nudge", "free"), 
+                envir=environment())
+  registerDoParallel(clust)
+  foreach(s = 1:nrow(sobol_fixed), 
+          .errorhandling = 'remove') %dopar% { # par loop
+    source("ActionPotential.R")
+    # Use the current parameter set for each optimization in this 
+    #   loop
+    message(paste("Starting table", s))
+    seed_param = unlist(sobol_fixed[s,])
+    
+    # Fuse all optimized parameters into one large df (with group 
+    #   id in one column)
+    data_table = foreach(g = 1:length(groups), 
+                         .combine = rbind) %do% {
+      AP_group = groups[[g]]
+      time = AP_group$t
+      
+      # Get all parameter sets for each group as df
+      group_pars = foreach(t = 1:nrow(traces_by_group[[g]]), 
+                           .combine = rbind) %do% {
+        trace = traces_by_group[[g]][t,]
+        AP = ActionPotential(seed_param, trace, time, "Group")
+        
+        # Search for the best of many optimizations
+        out_par = AP$nudge_optimize(opt_par_group, num_nudge,
+                                    1.5)
+        out_par_free = out_par$par[names(out_par$par) %in% 
+                                     names(free)]
+        
+        # Make df of free parameters
+        message(paste("Fit trace", t, "for group", g, 
+                      "on table", s))
+        #data.frame(tbl=s, group=g, indiv=t, t(sapply(out_par_free,c)))
+        data.frame(tbl=s, group=g, indiv=t, 
+                   t(sapply(out_par$par,c)), 
+                   values=out_par$value, 
+                   convergence=out_par$convergence)
+      }
+      group_pars
+    }
+    saveRDS(data_table, file = paste(output_folder_grp, 
+                                     group_file, s, 
+                                     "data_table.Rds", sep=""))
+    message(paste("Done with table", s))
+    data_table
+  }
+  stopCluster(clust)
+  message("Done computing tables")
+} else {
+  num_groups = length(trace_files)
+  groups = foreach(i = 1:num_groups, .combine = c) %do% {
+    AP_view = readRDS(paste(output_folder_grp, group_file, i, 
+                            "groupAP.Rds", sep=""))
+    print(paste("Group", i, "Ave"))
+    AP_view$display_action_potential()
+    AP_view
+  }
+  for (i in 1:num_groups) {
+    AP_tmp = groups[[i]]
+    trace_Vs = AP_tmp$Vs
+    st = AP_tmp$stabil_time
+    dt = AP_tmp$dt
+    l = length(AP_tmp$trace_data)
+    trace_Vs = trace_Vs[(st/dt):(st/dt+l)]
+    print(paste("Traces for group", i))
+    gen_exp_traces(AP_tmp$all_params, fixed, free, trace_Vs, 
+                   AP_tmp$t, num_gen_trace)
+  }
+}
+
+all_tables = vector("list", num_tables)
+output_catcher = foreach(s = 1:num_tables, 
+                         .errorhandling = 'remove') %do% {
+  all_tables[[s]] = readRDS(file = paste(output_folder_grp, 
+                                         group_file, s, 
+                                         "data_table.Rds", 
+                                         sep=""))
+}
+```
+
+```{r linear, echo=FALSE, message=FALSE}
+sim_data = foreach (d = 1:length(all_tables), .combine = rbind, 
+                    .errorhandling = 'remove') %do% {
+  all_tables[[d]]
+}
+sim_data$group = as.factor(sim_data$group)
+saveRDS(sim_data, file = paste(output_folder_grp, group_file, 
+                               "Allsim_data.Rds", sep=""))
+
+for (param in names(opt_par_group)) {
+  print(param)
+  grp_comp = lme(reformulate("group", param), 
+                 random = ~ 1 + group | tbl, data=sim_data, 
+                 control = lmeControl(opt = 'optim'))
+  print(summary(grp_comp))
+}
+
+```
+
+```{r group, echo=FALSE, message=FALSE, results="asis"}
+for (comp in 2:length(trace_files)) {
+  print(paste("Comparision", comp-1))
+  print(paste(trace_files[1], trace_files[comp]))
+  table_means = foreach (d = 1:length(all_tables), 
+                         .combine = rbind, 
+                         .errorhandling = 'remove') %do% {
+    dt = all_tables[[d]]
+    group_data1 = dt[dt$group==1,]
+    group_data2 = dt[dt$group==comp,]
+    
+    mean_diff = colMeans(group_data2) - colMeans(group_data1)
+  }
+  message("Generated table means")
+  
+  for (col in 1:ncol(table_means)) {
+    col_values = table_means[,col]
+    num_zeros = sum(col_values == 0)
+    if (num_zeros != nrow(table_means)) {
+      hist(col_values, main=paste("Histogram for", 
+                                  colnames(table_means)[col]), 
+           xlab="Parameter Average")
+    }
+  }
+  
+  print(kable(table_means, caption="Means of Parameters"))
+  print(kable(colMeans(table_means), caption="Means of Means"))
+  print(kable(sim_data, caption="All Simulated Data"))
+}
+```
