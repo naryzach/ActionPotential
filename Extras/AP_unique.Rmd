@@ -1,0 +1,89 @@
+---
+title: "Action Potential - Uniqueness Testing"
+output: 
+  html_document: default
+  pdf_document:
+    latex_engine: xelatex
+    pandoc_args: --listings
+date: "`r Sys.Date()`"
+params:
+  run: FALSE
+  cores: 1
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(doParallel)
+library(foreach)
+library(SobolSequence)
+library(knitr)
+source("ActionPotential.R")
+source("vars.R")
+```
+
+```{r header, echo=FALSE}
+trace_files = c("Atratus_WT.csv", "Atratus_P.csv", "Atratus_EPN.csv")
+unique_file = "uni_par"
+output_folder_uni = paste(output_folder, "/Uniqueness/", sep="")
+```
+
+```{r functions, echo=FALSE}
+phi <- function(fixed, vary, trace_d, time_d, cores) {
+  num_fits = 50
+  range = 0.25
+  
+  # Create uniformly distributed set of fixed paramters
+  init_par = as.data.frame(sobolSequence.points(length(fixed), count=num_fits)*(2*range) + (1-range))
+  colnames(init_par) = names(fixed)
+  for(r in 1:nrow(init_par)) {
+    init_par[r,] = init_par[r,] * fixed
+  }
+  
+  clust = makeCluster(cores)
+  clusterExport(clust, c("init_par", "vary", "trace_d", "time_d"), envir=environment())
+  registerDoParallel(clust)
+  fits = foreach(i = 1:num_fits, .combine = rbind, .errorhandling = 'remove') %dopar% {
+    source("ActionPotential.R")
+    
+    AP = ActionPotential(c(unlist(init_par[i,]), vary), trace_d, time_d)
+    out_par = AP$optimize(vary)
+    
+    data.frame(t(sapply(out_par$par,c)), values=out_par$value, convergence=out_par$convergence)
+  }
+  stopCluster(clust)
+  
+  return(fits)
+}
+
+```
+
+```{r main, echo=TRUE, results="asis"}
+vary_names = c('M_1','M_2','M_6','M_7','g_Na')
+vary = par_0[names(par_0) %in% vary_names]
+fixed = par_0[! names(par_0) %in% vary_names]
+if(params$run) {
+  for(file in trace_files) {
+    data = read.csv(paste(data_folder, file, sep=""), skip=3)
+    for(i in 1:(ncol(data)/2)) {
+      name = names(data[2*i])
+      trace_data = as.numeric(na.omit(data[,(2*i)]))
+      time_data_loc = as.numeric(na.omit(data[,(2*(i-1)+1)]))
+      fits = phi(fixed, vary, trace_data, time_data_loc, params$cores)
+      saveRDS(fits, file = paste(output_folder_uni, file, name, unique_file, ".Rds", sep=""))
+    }
+  }
+}
+
+for(file in trace_files) {
+  data = read.csv(paste(data_folder, file, sep=""), skip=3)
+    for(i in 1:(ncol(data)/2)) {
+      name = names(data[2*i])
+      uni = readRDS(paste(output_folder_uni, file, name, unique_file, ".Rds", sep=""))
+    print("Variable parameters:")
+    print(vary_names)
+    print(kable(uni, caption=paste("Fixed parameters uniformly spread using Sobel sequences for", name)))
+  }
+}
+
+```

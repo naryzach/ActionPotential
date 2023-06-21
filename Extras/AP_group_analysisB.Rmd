@@ -1,0 +1,134 @@
+---
+title: "Action Potential - Group Analysis"
+output: 
+  html_document: default
+  pdf_document:
+    latex_engine: xelatex
+    pandoc_args: --listings
+date: "`r Sys.Date()`"
+params:
+  run: FALSE
+  cores: 1
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(doParallel)
+library(foreach)
+library(SobolSequence)
+library(knitr)
+source("ActionPotential.R")
+source("vars.R")
+```
+
+```{r header, echo=FALSE}
+#trace_files = c("Atratus_WT.csv", "Atratus_P.csv", "Atratus_EPN.csv")
+group_file = "group_par"
+
+with(as.list(par_0), {
+  opt_par_group <<- c(#N_6=N_6,N_7=N_7,N_1=N_1,N_2=N_2,
+                  M_6=M_6,M_7=M_7,M_1=M_1,M_2=M_2,
+                  #H_4=H_4,H_5=H_5,H_6=H_6,H_3=H_3,
+                  g_K=g_K, g_Na=g_Na, g_Leak=g_Leak)
+})
+```
+
+```{r functions, echo=FALSE}
+group_comp <- function(pars, vary_names, trace_d, time_d, id, cores) {
+  num_fits = 10
+  range = 0.25
+  
+  # Split the dataset
+  vary = pars[names(pars) %in% vary_names]
+  fixed = pars[! names(pars) %in% vary_names]
+
+  # Create uniformly distributed set of fixed paramters
+  varied_sobol = as.data.frame(sobolSequence.points(length(vary), count=num_fits)*(2*range) + (1-range))
+  colnames(varied_sobol) = names(vary)
+  for(r in 1:nrow(varied_sobol)) {
+    varied_sobol[r,] = varied_sobol[r,] * vary
+  }
+  
+  # Get varied experimental traces
+  varied_traces = foreach(i = 1:num_fits, .combine = rbind) %do% {
+    group_par = c(unlist(varied_sobol[i,]), fixed)
+    AP_group = ActionPotential(group_par, trace_d, time_d)
+    Vs_gen = AP_group$generate_trace(PLOT=TRUE)$Vs
+    
+    # Trim atrificially implied data generated from trace
+    st = AP_group$stabil_time
+    dt = AP_group$dt
+    l = length(AP_group$trace_data)
+    Vs_gen[(st/dt):(st/dt+l)]
+  }
+  
+  # Optimize the original parameters againt the varied traces
+  orig_param = c(fixed, vary)
+  clust = makeCluster(cores)
+  clusterExport(clust, c("varied_traces", "opt_par_group", "orig_param", "time_d"), envir=environment())
+  registerDoParallel(clust)
+  mixed_fits = foreach(i = 1:num_fits, .combine = rbind) %dopar% {
+    source("ActionPotential.R")
+    
+    AP = ActionPotential(orig_param, unlist(varied_traces[i,]), time_d, "Group")
+    out_par = AP$optimize(opt_par_group) #over everything
+    
+    data.frame(t(sapply(out_par$par,c)), values=out_par$value, convergence=out_par$convergence)
+  }
+  stopCluster(clust)
+  
+  saveRDS(mixed_fits, file = paste(output_folder, group_file, id, "fits.Rds", sep=""))
+  saveRDS(varied_sobol, file = paste(output_folder, group_file, id, "sobol.Rds", sep=""))
+  saveRDS(varied_traces, file = paste(output_folder, group_file, id, "traces.Rds", sep=""))
+  
+  return(mixed_fits)
+}
+
+show_group_comp <- function(id, time_d) {
+  mixed_fits = readRDS(paste(output_folder, group_file, id, "fits.Rds", sep=""))
+  varied_traces = readRDS(paste(output_folder, group_file, id, "traces.Rds", sep=""))
+  
+  num_fits = nrow(mixed_fits)
+  for (i in 1:num_fits) {
+    AP_group = ActionPotential(unlist(mixed_fits[i,]), varied_traces[i,], time_d)
+    AP_group$display_action_potential()
+  }
+  
+}
+
+```
+
+```{r main, echo=TRUE, results="asis"}
+vary_names = c('g_Na', 'g_K', 'g_Leak')
+if(params$run) {
+  group_comp(par_0, vary_names, trace_data_ex, time_data_ex, "WT", params$cores)
+}
+show_group_comp("WT", time_data_ex)
+
+# For each file -- to be used once working
+if (FALSE) {
+  # Running code
+  for(file in trace_files) {
+    data = read.csv(paste(data_folder, file, sep=""), skip=3)
+    for(i in 1:(ncol(data)/2)) {
+      name = names(data[2*i])
+      trace_data = as.numeric(na.omit(data[,(2*i)]))
+      time_data_loc = as.numeric(na.omit(data[,(2*(i-1)+1)]))
+      fits = phi(fixed, vary, trace_data, time_data_loc, params$cores)
+      saveRDS(fits, file = paste(output_folder_uni, file, name, group_file, ".Rds", sep=""))
+    }
+  }
+  
+  # Displaying code
+  for(file in trace_files) {
+  data = read.csv(paste(data_folder, file, sep=""), skip=3)
+    for(i in 1:(ncol(data)/2)) {
+      name = names(data[2*i])
+      uni = readRDS(paste(output_folder_uni, file, name, unique_file, ".Rds", sep=""))
+      print("Variable parameters:")
+      print(vary_names)
+      print(kable(uni, caption=paste("Fixed parameters uniformly spread using Sobel sequences for", name)))
+    }
+  }
+}

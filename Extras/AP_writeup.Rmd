@@ -1,0 +1,481 @@
+---
+title: "Modeling *Thamnophis* Muscle Action Potentials with the Hodgkin-Huxley Model"
+output: 
+  html_document: default
+  pdf_document:
+    latex_engine: xelatex
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+author:
+    - name: "Ryan Gustafson"
+editor_options: 
+  markdown: 
+    wrap: 72
+params:
+  run: FALSE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(knitr)
+source("ActionPotential.R")
+source("vars.R")
+```
+
+## Hodgkin-Huxley Model
+
+### Introduction
+
+#### Goals:
+
+-   Produce a model of a neuron action potential using the
+    Hodgkin-Huxley model
+-   Create a model of an action potential in *Thamnophis* muscle tissue
+-   Use that model to predict values of $\overline{G_{Na}}$ in
+    tetrodotoxin-resistant muscle tissue given only the action potential
+    traces for those mutants.
+
+#### Current Assumptions:
+
+-   The shape of the foot of the action potential from experimental data
+    is developed for the passive propagation of ions proximal to the
+    site of recording
+-   This assumption is modeled by treating the stimulus as that passive
+    ion flow
+-   Hence, the stimulus is quadratic from 0mV to 10% of the total
+    experimental action potential height.
+    -   At this point the model is allowed to take over
+    -   Note that a quadratic stimulus means the integration thereof
+        produces a foot that is roughly cubic as appears to be the case
+-   The $\alpha$ and $\beta$ functions described by Hodgkin-Huxley can
+    be ported to skeletal muscle tissue with modifications to the
+    parameters as described below
+-   The objective function for scoring the efficacy of a model when
+    compared to wild-type action potential data is defined over the
+    entire domain of the experimental data with a strong bias towards
+    correct fitting of the peak.
+    -   In practice this is done by taking the sum of the differences
+        squared before and after the depolarization/repolarization phase
+        and that is added to the sum of quartic differences.
+        -   Even exponents are required as to not decrease the value of
+            the sum when taking the unordered difference
+        -   Differences are taken between the model output and the
+            experimental data
+-   Conductances of K, Na, and Leak are retained from the Hodgkin-Huxley
+    assumptions
+-   Electromotive potentials of K and Na are approximated from the
+    Nernst equation and known concentrations of the Kreb's solution
+    -   $R = 8.3144598 J/mol*K$
+    -   $F = 96.485 J/mol*mV$
+    -   $T = 296.15 K$ (Room temperature)
+    -   $z$ is the ionic charge
+    -   $\cfrac{RT}{zF}\ln\cfrac{[ion]_{\text{out}}}{[ion]_{\text{in}}}$
+    -   Kreb's solution: 145 Na^+^, 127.7 Cl^−^, 25 HCO~3~^−^, 5.5
+        glucose, 5.4 K^+^, 1.2 Mg^2+^, 1.8 Ca^2+^, 1.2 H~2~PO~4~^−^, 1.2
+        SO~4~^2−^ and supplemented with 95% O2 and 5% CO2 to achieve pH
+        \~7.35.
+    -   Estimated intracellular concentration (rodent white
+        *gastrocnemius* tissue): 9.6 Na^+^, 8.7 Cl^−^, 143 K^+^, 31.2
+        Mg^2+^, and 3.5 Ca^2+^.
+-   The current of the Leak channel is assumed to be that of the resting
+    membrane potential because of its apparent role in the model.
+    -   The resting membrane potential is relatively close to the
+        concerted contribution of the accessory ions in the Kreb's
+        solution, but the difference from RMP is not insignificant
+-   Possible assumption: the model can be split into two separate optimizations where the trace up the the peak is under the control of the sodium parameters and the the trace after the peak is under the control of the potassium parameters. This may be able to be achieved by optimizing the K parameters, then the Na parameters, then repeating the process until adequate fitting is achieved.
+
+#### Observations:
+
+-   Using different initial parameters, the models do not converge to
+    the same curve when used optim. However, this optimization, upon
+    visual inspection, are qualitatively different from each other and
+    are not expected to represent the same parameters.
+-   Using the methodology of nudging parameters to search for equilibria
+    faithfully predicts the observed conditions from the HH experiemnts
+    when applied to neuron potential data.
+    -   This suggests that this methodology is a reliable way to predict
+        the structure of an action potential curve in another tissue.
+    -   This also suggests that parameter values are meaningful and
+        likely unique for a given curve. However, there are a couple
+        caveats
+        -   There are parameters (that differ between different shaped
+            fits) that produce minimal change to the shape of the
+            predicted action potential, and other that appear to be
+            highly sensitive to initial conditions. This seems to imply
+            that parameters can be adjusted to produce a visually simiar
+            curve which questions the uniqueness of the output.
+        -   To partially quell this concern, it has been seen that
+            subjectively large changes in parameters produce markedly
+            different curves.
+        -   Secondly, the low sensitivity of some parameters may prove
+            to be transformative in other contexts, but also indicates
+            that the utility of the model is not compromised because of
+            the ability to change parameters and achieve similar
+            outputs.
+-   Using a "nudging" technique where the initial parameters are
+    randomized within a specified range of their original values
+    generates a variety of curves that can be optimized. Taking the best
+    of these optimizations with "nudged" initial conditions has allowed
+    for the close approximation of the averaged wild-type action
+    potential data
+-   Deviations of $\alpha$ and $\beta$ parameters for subunit $h$ make
+    dramatic changes in the shape of the action potential for the found
+    parameters.
+    -   This differs from the H-H model where changes in $m$ resulted in
+        more dramatic changes.
+-   The electromotive potential of the modeled leak channel usually
+    matches, or is decently close to, the modeled resting membrane
+    potential.
+    -   When speaking of the resting membrane potential (RMP) of the
+        model, this can be thought of the voltage the model predicts
+        after infinite time with no stimulation. Caveats to this
+        interpretation are:
+        -   The model, occasionally predicts that the membrane is
+            hyperexcitable under the given conditions meaning that
+            action potentials are produced in the absence of a stimulus.
+        -   In a number of iterations of the model, there appear to be
+            multiple stable equilibria. Alternatively, due to the short
+            time scale of measurement, there is one equilibrium that is
+            stable but dramatically different that the initially
+            supplied voltage. To investigate this, longer time scales or
+            variation in initial voltage/RMP can be checked for other
+            stable equilibria.
+    -   A possible explanation of the equality is because at low
+        voltages, the model aught to predict that the probability of any
+        of the subunits in question be near 0. Hence, the only
+        contribution to the membrane current will be the leak channel
+        due to its lack of dependence on probabilistic channel
+        opening/closing -- it is constitutive.
+-   When the resting membrane potential of the model is less than that
+    of the experimental observation, the optimization tends to more
+    frequently predict a hyperexcitable model.
+    -   This is likely because the model is rewarded for producing a
+        model that has a membrane potential near the experimental RMP
+        just before and after the action potential. This means the the
+        model is "better" if it is already rising before the action
+        potential and falling after (creating an intersection which
+        necessarily reduces the value of the objective function). This
+        means that the model is very likely to be one that spontaneously
+        depolarizes -- leading to an errant rise in voltage before the
+        stimulus.
+-   With respect to the choice that 10% of the action potential is
+    initiated by the propagating voltage, it appears that this
+    assumption can be dropped to around 6% before the membrane becomes
+    hyper excitable and generates erroneous actin potentials without
+    stimulation.
+-   It appears that a large portion of the issues with fitting can be attributed to the quality of the fitting of the foot. That is to say that the closer the model of the foot is to the experimental foot, the speed and quality of optimization appears to improve.
+-   A number of parameters from the original equations can be removed because they are mathematically redundant (and cause idenitfiability issues). Even once all of the parameters that can resonably be accounted for mathematically are removed (or replaced with different variables), there are still identifiability issues. Moving forward, a subset of the parameters can be held constant to better understand the the requirements for the reasonable uniqueness of the system.
+-  I have been testing with splitting up the optimization into two parts (the first that deals with only optimizing the sodium parameters and the second that focuses soley on the potassium parameters). The initial reuslts that optimised K then Na showed promissing results such that $G_Na$ was about 141, 85, 83 for WT, P, and EPN respectively which is exactly what is expected based on the level of steric hinderenace that is caused by the mutation in the Na-channel that reduce the binding affinity of TTX.
+    -   However, the fits of these model were not vidually good exept for the depolatization phase (and even that was inconsistent). 
+    -   Futhermore, after continued fitting with only the K parameters, the the fits only appreared mildly better; but obviously the Na parameters were the same since they were not nvolved in the optimization routine. 
+        -   This porcess can likely be continued cyclically to hone in the quality of the trace fit by switching between K and Na parameters.
+-   I spent a fair amount of time struggling with the optimizer throwing an error with a handful of traces stating that the model could not be run at the initial condtions. This was occuring while testing the cyclical adjustment model where the K parameters are optimized over the later parts of the action potential, the the Na parameters are optimized over the former; this cycle is repeated. I tried Nelder-Mead optimization and BFGS, but neither completed with all of the traces. The unruly traces appeared to be in the P-mutation group, but that was not definitely verified. However, once the option of "Hessian=FALSE" was added, the optimizer didn't complain even after 5 cycles. Running a larger number of cycles to test. 
+    -   It appears that my previous assumption that changing the heassian value to FALSE was incorrect. Upon further investigation, it appears that the calculated values for Vs in the objective function result in NA values. 
+        -   This may be happening because the model is "blowing up" sicne the last value that is not NA is 3 orders of magnitide greater than the last and 10+ orders of magnitide greater than anythin resonable that would come out of the model
+        -   It is possible that the model does not have a high enough resolution for each time step and a more advance method such as higher order runge-kutta method. 
+        -   It is also possible that one of the parameter values is causing some errant math error that inadvertantly results in a near-zero division or somethinf similar.
+    -   I am currently simply returning a high value from the objective function in this case so that the model avoids the condition in which it occurs rather than attempting the remediate the model or improve the granularity of the fitting technique because the error, though persistenet, happens in only a couple traces. Furhtermore, the conditions under which these kinds of results would occur is likely in a model that would not apporximate the data very well. I belive this because in the original testing, the time step that began to cause problems with the Euler's method of estimation was larger than the largest time step that I am currently using by at least double. 
+        -   After some models continuing to produce unwanted values despite the large penalty, I have switched the penalty to Inf, and that does not, yet, appear to have programmatic consequences.
+-   One of the trace tests (2/9/23) shows reasonable agreement with most of the curves (except for those in the EPN class), and shows the TTX-resistant groups with a smaller $G_{Na}$ on average than those in the WT group. However, the values for the EPN group were larger than the values of the P group which is counter to the expectation. With this observation, it shuold be reitterated that the fits for the EPN group were not as good as the other two groups.
+-   The ODE solver method does work but, on a couple occations, retuns a prediction that immediately runs to $\pm$ infinity. Visually, this appears to be a curve that "integrates to zero" meaning that it will return an objective value of zero regardless of its infeasiblity. One way to try to avoid this is to heavily penalize traces with behavior tending to infinity in the voltage traces.
+-   It was noted that models before 2/22 the $g$ parameters were not being updated properly becuase of a bug in thte code. The model was storing them as local updates in the updating function, but were not being stored in the model. I am unsure where the modifications of the values of $g$ originiated since the model does not change once they are updated. My guess is that they were changed from the perspective of optimizer, but it did not "notice" that they do not have an effect on the change of the model. Regardless, the outputs are unreliable. With a modification that ensures that the values of the $gs$ are stored in the contents of the model, one iteration of the split optimizer yields higher values on average of $g_{Na}$ for the WTover those of the mutants. I am now testing more iterations. The trace on 2/22 shows the changes optimizing over only $g$ paramters.
+    -   After running the split optimizer (3/1) with more iterations, the $gs$ follow the expected trend and the fits look marginally better
+    -   I will run the original algotithm to see if the bug makes any difference in that repsect. 
+        -   The original algorithm with run with the updated code returns the same result (3/10). However, an additional measurment of the standard deviation shows that there is a very large spread of the data. (3/13 is the split optimization with added information about standard deviation).
+
+#### Ideas:
+
+-   If there exsit traces that have multiple sub-threshold stimpuli, the model could be fit to all of those simultaneoulsy to help the model determine what the correct excitability is. We could use these numbers as the new initiation values for the rest of the action potential optimizations.
+-   The parameters at this point are still interrealted wherein tradeoffs from one can overcome the deficits of another in a variety of ways, so the solutions are still lacking uniqueness. A strategy needs to be developed to resonably choose when varibles are adjusted and by how much to achieve certian features of the trace data. It is possible that this could be done by reframing teh poptimization with multiple "features" and asking the objective function to be a matrix of parameters and features that are needed to be solved. 
+-   Unfinished thought: After numerous runs that attempted to uncover the non-uniqueness of the system, I had a realization after removing more and more parameters:
+    -   The model will have a similar degree of non-uniquness with the reduced parameter set because the parameters that were removed from the optimization (and were fixed to their origional "optimized" value) will continue to contribute the same effect that they origionally had on the non-uniqueness. And due to the nature of them being fixed (at their optimum), they will not be a reliable indicator of non-uniquness in the new optimizaiton since they will already be at the position that allowed the model to achieve that fit in the pervious optimization.
+
+### Equations
+
+#### Current
+
+The current across the membrane is given by:
+$$ I_m = I_{K} + I_{Na} + I_{Leak} $$ Where each current is given by
+$$ I_K = \overline{G_K}\cdot n^4 (V_m-E_K) $$
+$$ I_{Na} = \overline{G_{Na}}\cdot m^3h (V_m-E_{Na}) $$
+$$ I_{Leak} = \overline{G_{Leak}} (V_m-E_{Leak}) $$
+
+#### Timestep
+
+The change in membrane potential over time can be given by
+$$ \cfrac{dV_m}{dt}=\cfrac{I_{stim}-I_m}{C_m}$$ $\alpha$ is the rate
+that sub-units are converted from the non-permissive state to the
+permissive state as a function of voltage. $\beta$ is the reverse rate.
+Stated differently, with $n$ as the number of open sub-units, $\alpha$
+is the probability that a closed sub-unit opens per unit time, $\beta$
+is the probability that an open sub-unit closes per unit time, **the
+number of sub-units that change per unit time** is
+$(1-n)\alpha_n-n\beta_n$.
+
+Let $s \in \{n,m,h\}$ be a sub-unit with a probability of activation (or
+inactivation for $h$)
+$$ \cfrac{ds}{dt}=\alpha_s(V_m)(1-s)-\beta_s(V_m)s $$
+
+Rearranging the equation: \begin{align*}
+  \cfrac{ds}{dt}&=\alpha_i(1-s)-\beta_s s\\
+  &=\alpha_s-\alpha_ss-\beta_s s\\
+  &=\alpha_s-(\alpha_s+\beta_s)s\\
+  &\implies\\
+  \cfrac{1}{\alpha_s+\beta_s}\frac{ds}{dt}&=\cfrac{\alpha_s}{\alpha_s+\beta_s}-s
+  \end{align*}
+This can be described as
+$$ \cfrac{ds}{dt}=\cfrac{s_\infty(V)-s}{\tau_s(V)} $$ Where $s_\infty$
+is the steady-state solution
+$$ s_\infty=\cfrac{\alpha_s(V)}{\alpha_s(V)+\beta_s(V)} $$ And $\tau_s$
+is the time constant $$ \tau_s=\cfrac{1}{\alpha_s(V)+\beta_s(V)} $$ The
+functions $\alpha$ and $\beta$ for $n$ can be described as
+$$ \alpha_n(V) = N_1\cfrac{V+N_2}{e^{\frac{V+N_2}{N_3}}-1} $$
+$$ \beta_n(V) = N_4e^{\frac{V+N_5}{N_6}} $$ $\alpha$ and $\beta$ for $m$
+$$ \alpha_m(V) = M_1\cfrac{V+M_2}{e^{\frac{V+M_2}{M_3}}-1} $$
+$$ \beta_m(V) = M_4e^{\frac{V+M_5}{M_6}} $$ $\alpha$ and $\beta$ for $h$
+$$ \alpha_h(V) = H_1e^{\frac{V+H_2}{H_3}} $$
+$$ \beta_h(V) = \cfrac{1}{1+e^{\frac{V+H_4}{H_5}}} $$
+
+By inspecting the equations for $\beta_n$, $\beta_m$, $\alpha_h$, it can
+be seen that the three equations that govern those parameters are, in
+fact, only dependent on 2 parameters. This was discovered by visualizing
+a scatter-plot of the parameters $M_4,M_5,M_6$ in 3D-space generated by
+running 2500 optimization with quasi-random parameters within 5% of
+their originally optimized value generated via Sobol-sequences. It was
+found that these 3 parameters, whose optimized traces are reasonably
+similar, sit on a clear surface in 3D parameter space, and thus can be
+reduced to a 2 parameter system. The relevant demonstration is shown
+below. The equation for $\beta_n$ can be simplified to
+$$ \beta_n(V) = N_4e^{\frac{V+N_5}{N_6}} = e^{\frac{V+N_5}{N_6}+\ln(N_4)} = e^{\frac{V+N_5+\ln(N_4)N_6}{N_6}}  =e^{\frac{V+N_7}{N_6}}  $$
+where $N_7=N_5+\ln(N_4)N_6$.
+Equally,$$ \beta_m(V) = M_4e^{\frac{V+M_5}{M_6}} = e^{\frac{V+M_5}{M_6}+\ln(M_4)} = e^{\frac{V+M_5+\ln(M_4)M_6}{M_6}}  =e^{\frac{V+M_7}{M_6}}  $$
+where $M_7=M_5+\ln(M_4)M_6$. And,
+$$ \alpha_h(V) = H_1e^{\frac{V+H_2}{H_3}} = e^{\frac{V+H_2}{H_3}+\ln(H_1)} = e^{\frac{V+H_2+\ln(H_1)H_3}{H_3}}  =e^{\frac{V+H_6}{H_3}}  $$
+where $H_6=H_2+\ln(H_1)H_3$.
+
+Upon inspection of the graphs of $\alpha_n$, it appeared that the function was mostly linear over the range of voltages used by the action potential. Looking over the range of voltages used in the action potential $e^{\frac{V+N_2}{N_3}}<0.05\approx0$. So, $\alpha_n$ can be approximated by
+$$ \alpha_n \approx N_1\frac{V+N_2}{-1} = -N_1V-N_1N_2 $$
+The signs of $N_1$ and $N_2$ were flipped for ease of programmatic implementation and the final equation used is
+$$ \alpha_n(V_m) = \begin{cases} N_1V_m-N_1N_2 &, V_m \geq N_2 \\ 0 &, V_m < N_2 \end{cases} $$
+This change is corroborated by a non-uniqueness issue between $N_1$ and $N_2$ which showed a strong linear correaltion to each other, as well as a large coefficient of variance of $N_3$ over many optimzation of the model. This evidence agrees with the change since $N_3$ has been removed from the parameter set. Testing showed that $\alpha_m$ is also able to handle this adjustment, so $M_3$ was removed from the parameter set with the new equation
+$$ \alpha_m(V_m) = \begin{cases} M_1V_m-M_1M_2 &, V_m \geq M_2 \\ 0 &, V_m < M_2 \end{cases} $$
+
+#### Entire Equation System
+
+$$ \begin{cases}
+\frac{dn(V,n,m,h)}{dt} = \left( N_1\cfrac{V+N_2}{e^{\frac{V+N_2}{N_3}}-1} \right)(1-n)-\left( N_4e^{\frac{V+N_5}{N_6}} \right) n\\
+\frac{dm(V,n,m,h)}{dt} = \left( M_1\cfrac{V+M_2}{e^{\frac{V+M_2}{M_3}}-1} \right)(1-m)-\left( M_4e^{\frac{V+M_5}{M_6}} \right) m\\
+\frac{dh(V,n,m,h)}{dt} = \left( H_1e^{\frac{V+H_2}{H_3}} \right)(1-h)-\left( \cfrac{1}{1+e^{\frac{V+H_4}{H_5}}} \right) h\\
+\frac{dV(V,n,m,h)}{dt} = \cfrac{I_{stim}-\left[\overline{G_K}\cdot n^4 (V-E_K) + \overline{G_{Na}}\cdot m^3h (V-E_{Na}) + \overline{G_{Leak}} (V-E_{Leak})\right]}{C_m}
+\end{cases} $$ Where $N_1,N_2,N_3,N_4,N_5,N_6,M_1,M_2,M_3,M_4,M_5,M_6,H_1,H_2,H_3,H_4,H_5,\overline{G_{K}},\overline{G_{Na}},\overline{G_{Leak}},E_{K},E_{Na},E_{Leak},C_m$ are known constants and $I_{stim}$ is given. 
+
+
+#### Parameterization
+
+The variables
+$N_1,N_2,N_3,N_4,N_5,N_6,M_1,M_2,M_3,M_4,M_5,M_6,H_1,H_2,H_3,H_4,H_5$
+are optimized over. Note the output of the R code gives the optimized
+values of the stated parameters.
+
+## Computational Method
+
+1.  Start with an initial voltage. It is sensible to use the
+    experimental resting membrane potential
+
+    a.  Initialize $n,m,h$ with $s_\infty$ equations
+
+2.  Using Euler's method, numerically integrate each $\frac{ds}{dt}$
+    over the specified timestep
+3.  Calculate $I_m$
+4.  Using Euler's method, numerically integrate $\frac{dV_m}{dt}$ over
+    the specified timestep
+5.  Return to step 2
+
+## Statistical Analysis
+
+-   Using the parameters from a model with a good fit against the
+    experimental data, the voltage trace as an output from that model
+    was saved. From there the model trace data was used as the new
+    benchmark for optimization in a statistical analysis. Using
+    Sobol-sequences, quasi-random parameters were generated in a
+    pre-defined range from the originally fit parameters and were
+    subsequently optimized against the model trace.
+    -   The Sobol-sequence is used in favor of generating data from a
+        random uniform distribution because it improves the coverage of
+        the higher dimensional parameters space.
+    -   The reasoning behind this undertaking is to determine whether or
+        not an action potential fit is unique and whether or not any
+        given fit, if they aren't unique, is better than another.
+        Additionally, this may tease out how to determine what parameter
+        set would be best to use as an initial point from which to run
+        an optimization. It may be the case that there exists a subset
+        of the parameter space over which searching for optima is the
+        most fruitful. That is to say that only a small subset of
+        parameters my give rise to reasonable action potentials.
+    -   In a similar effort, but with a different strategy, it may be
+        possible to adjust action potential models directly given a
+        specific characteristic. For instance, if the model is
+        converging to an action potential that has oscillatory end
+        behavior, it may be possible to adjust only a subset of
+        parameters to fix that observed behavior. This would raise the
+        question of which parameter is best to fix a specific behavior
+        if multiple parameters can be chosen to elicit the same effect.
+-   This process was repeated a number of times to determine the
+    uniqueness for the fit, and a handful of non-uniqueness conditions
+    were discovered wherein two traces had equitable fit to the model
+    trace but had significantly different parameters.
+-   It appears that good fits can be archives in a relatively small
+    range, with the exception of the non-uniqueness, as long as the
+    original parameters are sufficiently close to the experimental data.
+    In practice this has been when the parameters are already within
+    10-20% of their fitted value upon optimization.
+
+## Fitting Experimental Trace Data
+
+-   A routine was developed to iterate search though an experimental
+    action potential trace to find the best for for the foot of the
+    action potential by varying the time at which the "stimulus" is
+    generated
+    -   The stimulus, in this, case is meant to model the propagation of
+        ion flow towards a data-collection site in the *Thamnophis*
+        muscle tissue rather than to emulate an external voltage applied
+        to the tissue. This is why this foot-finding approach is used.
+    -   With the stimulus fixed to the foot of the action potential, the
+        experimental traces is then fitted via an optimization routine
+        in R called "optim".
+-   When fitting the foot of the experimental trace data, the following
+    methodology is used.
+    -   The assumption is that each experiential action potential was
+        exposed to the same amount of propagating current. Under this
+        assumption, the integral of the stimulus is fixed. The reason
+        for this is that with a constant integral for the stimulus, the
+        stimulus should supply the same total amount of current to the
+        behavior of the action potential, and since the current
+        experienced by the model stimulus is the integral of stimulus.
+    -   With this setup, during the foot fitting process, the model foot
+        is optimized to the trace of the experimental data while
+        maintaining an equivalent integration of the stimulus by varying
+        the height of the stimulus as a function of the time that the
+        stimulus is felt. That is to say that action potentials with a
+        more shallow depolarization phase has stimuli with lower height
+        over a longer duration.
+-   Explanation for mathematical derivation
+    -   First, a function $f(x)$ needs to have the properties $f(0)=0$
+        and $f(d)=h$ where $d$ is the duration of the stimulus and $h$
+        is the height of the stimulus. Secondly, the function should
+        have the property such that the integral, $F(0)=0$. That is to
+        say that, with $A$ as the stimulus
+        area,$$ A=\int_0^d f(x)dx = F(d)-F(0)=F(d) $$
+    -   Functions with this property are (not exhaustively) exponential
+        and monomial functions. So, for some monomial $p(x)$, since
+        $p(1)=1$, $hp(\frac{x}{d})=h$ when $x=d$. Thus,
+        $f(x)=hp(\frac{x}{d})$ satisfies the properties listed.
+    -   Now, choose $p(x)=x^m$. Then,
+        $$A=\int_0^d f(x)=\int_0^d h\left(\frac{x}{d}\right)^mdx = \frac{hx^{m+1}}{(m+1)d^m}\bigg\vert_0^d = \frac{hd}{m+1}$$
+    -   So, $h=\frac{(m+1)A}{d}$
+    -   Thus, an optimization can be run over the start time of the
+        stimulus and the duration of the stimulus without recalculating
+        the area of each function by pre-calculating the area found when
+        fitting the wild-type average data and using the formula for
+        $h$.
+-   Since the action potential of a muscle cell is largely under the control of K and leak in the resting phase and Na only has its predominant effect during the depolarization phase of the action potential. So, a possible optimization proceedure can be performed:
+    -   Only optimize the K parameters by calculating the error from the trace to the preduction on the RMP prior to the depolarization phase and during the repolarization phase. The repolarization phase can be set to start about 5% prior to the peak of the action potential to enure that there is overlap between the optimization regions. For K, the error during the depolarization phase is is ignored
+    -   The Na parameters are then optimized by taking the squared sum of the difference (the error) between the trace and the prediction for the depolarization region (begining of the foot to 5% past the peak) alone. 
+    -   This process is repeted until there is "good" agreement with the original trace
+    -   This proceedure can be changed to where a (not necessarily proper) subset of the parameters are fit to the entire trace (either for the first optimization or last or both) to show that proper alignment with the model is possible and that the presence of "trade-off parameter sets" can adjust the disagreement after the cyclycal process is complete
+    -   Another possiblility to reduce the impact of prameter-tradeoff is to restict the paramter values within a certian window. This could be done by supplying the optimizer with a (relitively) very large penalty for choosing a possible parameter that is more than or less than some percentage of the original parameter value
+        -   This could start at 25% and be refined to a smaller window if the optimization is still suficient at such a small window.
+
+## Fitting Procedure Summary
+1. Start with the parameter set that was able to fit the data for the wild-type average. Additionally, Calculate the area under the stimulus curve that best fit the wild-type average
+2. With the data from a novel trace, use an algorithm that matches the integration of the stimulus to the foot of the novel trace by varying the stimulus (in such a way that maintains the same area as was found from the wild-type average). 
+    a. The assumption is that the foot of the action potential is a result of the passive ion flow from the muscle cell rather than ion-channel activity if the muscle cell, meaning that, under consistent experimental conditions, the total passive ion flow (area of the stimulus) will be constant.
+    b. This is achieved by changing the duration and the steepness of the stimulus and then adjusting the height to maintain the correct area.
+    c. The stimulus is also moved temporally to better approximate the beginning of the foot.
+3. Now that the foot is properly approximated, optimize the parameters for the novel trace using the wild type parameters as a seed. 
+    a. It is noted that th optimization routine does not always find reasonable fits with the seed parameters, so the seed parameters are randomized within a small (10%) range to encourage better fitting.
+    b. This randomization-fitting process is repeated to try to find a set of seed parameters that adequately converge on the novel trace
+    c. Note that this randomization-fitting process is not always needed except for in the unruly traces.
+4. Once the parameters are found for all of the novel traces, compare the parameters between the different experimental groups
+    a. Data yet to come
+
+\newpage
+
+## Fitting the Model to Wild-Type *Thamnophis* Action Potential Muscle Trace Data
+
+```{r opt, echo=FALSE}
+AP = ActionPotential(par_0, trace_data_ex, time_data_ex,"Main_Doc")
+
+if(params$run) {
+  AP$find_foot()
+  AP$optimize(opt_par_0)
+}
+```
+
+```{r data, echo=FALSE, results='asis'}
+library(knitr)
+kable(t(AP$all_params), caption="List of all parameters")
+```
+
+```{r main, echo=TRUE, fig.asp=0.75}
+AP$display_all_plots()
+```
+
+```{r original_setup, Echo=FALSE}
+AP_data_N = read.csv(paste(data_folder, "Neuron_AP.csv", sep=""))
+trace_data_N = rep(-60, 10/0.005) #AP_data_N$Neuron_membrane_potential_mV
+time_data_N = AP_data_N$Time_ms
+
+par_0_HH <- c(N_1=-0.01,N_2=60.01,N_3=-10,N_4=0.125,N_5=70,N_6=-80,N_7=236,
+           M_1=-0.1,M_2=45.01,M_3=-10,M_4=4,M_5=70,M_6=-18,M_7=45,
+           H_1=0.07,H_2=70,H_3=-20,H_4=40,H_5=-10,H_6=123,
+           g_K=36, g_Na=120, g_Leak=0.3)
+
+with(as.list(par_0_HH), {
+  opt_par_0_HH <<- c(N_6=N_6,N_7=N_7,N_1=N_1,N_2=N_2,N_3=N_3,
+                  M_6=M_6,M_7=M_7,M_1=M_1,M_2=M_2,M_3=M_3,
+                  H_4=H_4,H_5=H_5,H_6=H_6,H_3=H_3,
+                  g_K=g_K, g_Na=g_Na, g_Leak=g_Leak
+                  )
+})
+
+K_HH <- new("Channel", g=36, E=-75)
+Na_HH <- new("Channel", g=120, E=55)
+Leak_HH <- new("Channel", g=0.3, E=-50)
+
+K_orig <- K_HH
+Na_orig <- Na_HH
+Leak_orig <- Leak_HH
+
+ActionPotential$methods(
+  stim_function = function(x) {
+    return((x*0) + 20)
+  },
+  update_subunits = cmpfun(function(params) {
+    all_params <<- params
+    with(as.list(all_params), {
+      n@alpha <<- function(V) N_1*(V+N_2)/(exp((V+N_2)/N_3)-1)
+      n@beta <<- function(V) exp((V+N_7)/N_6)
+      m@alpha <<- function(V) M_1*(V+M_2)/(exp((V+M_2)/M_3)-1)
+      m@beta <<- function(V) exp((V+M_7)/M_6)
+      h@alpha <<- function(V) exp((V+H_6)/H_3)
+      h@beta <<- function(V) 1/(1+exp((V+H_4)/H_5))
+      K@g <<- g_K; Na@g <<- g_Na; Leak@g <<- g_Leak
+    })
+  })
+)
+```
+
+```{r original_run, Echo=FALSE, results='asis', fig.asp=0.75}
+AP_N = ActionPotential(par_0_HH, trace_data_N, time_data_N, "Neuron")
+AP_N$stim_d = 1
+AP_N$generate_trace()
+
+if(params$run) {
+  AP_N$find_foot()
+  AP_N$optimize(opt_par_0_HH)
+}
+
+kable(t(AP_N$all_params), caption="List of all parameters (Neuron)")
+AP_N$display_all_plots()
+```
